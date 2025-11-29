@@ -1,0 +1,2038 @@
+---
+title: "Aspectos Generales de R y Muestro"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    theme: darkly
+editor: visual
+---
+
+# 1.1. Introducción
+
+Este capítulo presenta los **aspectos fundamentales del lenguaje R**:
+
+-   Naturaleza **vectorizada** del lenguaje.
+-   Manejo de **objetos**, **clases** y **atributos**.
+-   Concepto de **entornos** y cómo R evalúa expresiones.
+
+# 1.2. R como lenguaje vectorizado
+
+R está diseñado para operar sobre **vectores completos**, no sobre bucles explícitos. Esto tiene implicaciones profundas para la forma en que se escriben algoritmos de muestreo y análisis estadístico.
+
+Ejemplo simple:
+
+```{r}
+x <- 1:5
+x * 2       # Operación de todos los elementos
+log(x)      # Funciones sobre el vector
+```
+
+La vectorización permite expresar cálculos de manera declarativa y eficiente.
+
+# 1.3. Tipos de objetos en R
+
+Los objetos fundamentales de R incluyen:
+
+-   **Vectores atómicos**: logical, integer, double, character.
+-   **Listas**: contenedores heterogéneos.
+-   **Data frames**: tablas columnares.
+
+```{r}
+v_num  <- c(1.2, 3.5)
+v_char <- c("a", "b")
+lista  <- list(a = 1:3, b = "texto")
+df     <- data.frame(id = 1:3, x = c(5, 6, 7))
+```
+
+Cada objeto tiene una **clase**, que define su comportamiento:
+
+```{r}
+class(df)
+str(lista)
+```
+
+# 1.4. Atributos y clases S3
+
+R implementa orientación a objetos mediante el sistema **S3**, que se basa en clases y métodos genéricos:
+
+```{r}
+x <- 1:5
+attr(x, "descripcion") <- "vector de ejemplo"
+attributes(x)
+```
+
+Los métodos genéricos despachan según la clase del objeto:
+
+```{r}
+print(df)      # Llama al método print.data.frame
+summary(df)    # Llama a summary.data.frame
+```
+
+Este mismo sistema permite que paquetes como **survey**, **srvyr** y **dplyr** redefinan cómo funcionan operaciones estándar dependiendo del tipo de objeto.
+
+# 1.5. Ecosistema de extensiones en R
+
+R destaca porque permite extender su funcionalidad mediante paquetes. Los ecosistemas más importantes son:
+
+## 1.5.1. CRAN
+
+El repositorio principal, con miles de paquetes validados.
+
+## 1.5.2. tidyverse
+
+Colección coherente de paquetes para ciencia de datos:
+
+-   tibble
+-   dplyr
+-   tidyr
+-   ggplot2
+-   purrr
+-   stringr
+-   readr
+
+## 1.5.3. Extensiones estadísticas
+
+Para muestreo y encuestas:
+
+-   **survey**: diseño, estimación, varianzas.
+-   **srvyr**: interfaz tidy al paquete survey.
+-   **sampling**, **SamplingStrata**, etc.
+
+## 1.5.4. Extensiones de alto rendimiento
+
+Para escenarios avanzados:
+
+-   **data.table**
+
+-   **parallel**, **future**, **furrr**
+
+-   **Rcpp**
+
+# 2.1 Introducción
+
+En este capítulo desarrollamos **dplyr** desde cero, pero siempre con la mirada puesta en su uso para:
+
+-   preparar marcos muestrales,
+-   limpiar bases tipo FC01,
+-   construir dominios,
+-   generar variables auxiliares,
+-   producir resúmenes previos al diseño survey.
+
+El objetivo es que domines la **sintáxis**: un conjunto pequeño de verbos que permiten expresar transformaciones complejas de manera clara, reproducible y eficiente.
+
+# 2.2 El paradigma Tidy: datos limpios, verbos claros
+
+El paradigma tidy se basa en tres pilares:
+
+1.  **Cada fila es una observación.**
+2.  **Cada columna es una variable.**
+3.  **Cada tabla describe una entidad coherente.**
+
+En muestreo, estos principios se traducen en:
+
+-   un marco de viviendas/hogares estructurado limpiamente,
+-   separación clara entre variables del marco y variables de análisis,
+-   consistencia en nombres y tipos de dato.
+
+Cargamos dplyr:
+
+```{r}
+library(dplyr)
+library(tidyr)
+set.seed(123)
+```
+
+# 2.3 Creación de un marco simulado como ejemplo
+
+Creamos un marco simple:
+
+```{r}
+marco <- tibble(
+  upm      = rep(1:5, each = 8),
+  hogar    = 1:40,
+  estrato  = rep(c("E1","E2"), each = 20),
+  area     = rep(c("urbano","rural"), times = 20),
+  miembros = sample(1:6, 40, replace = TRUE),
+  ingreso  = round(rlnorm(40, meanlog = 8, sdlog = 0.5), 2)
+)
+
+marco
+```
+
+# 2.4 Verbos fundamentales de dplyr
+
+## 2.4.1 filter() – seleccionar subconjuntos
+
+Muy usado para **dominios**:
+
+```{r}
+marco %>% filter(area == "urbano")
+```
+
+Más condiciones:
+
+```{r}
+marco %>% filter(area == "urbano", estrato == "E1")
+```
+
+## 2.4.2 select() – escoger columnas y ordenarlas
+
+Útil para preparar un marco limpio:
+
+```{r}
+marco %>% select(upm, estrato, area, ingreso)
+```
+
+Renombrar y seleccionar:
+
+```{r}
+marco %>% select(
+  id = hogar,
+  upm,
+  ingreso,
+  dominio = area
+)
+```
+
+## 2.4.3 mutate() – construir nuevas variables
+
+Ejemplo típico: ingreso per cápita e indicador de pobreza.
+
+```{r}
+umbral <- 3000
+
+marco %>%
+  mutate(
+    ingreso_pc = ingreso / miembros,
+    pobre = ingreso_pc < umbral
+  )
+```
+
+## 2.4.4 arrange() – ordenar observaciones
+
+Crucial cuando se trabaja con PRN o con selección sistemática.
+
+```{r}
+marco %>% arrange(ingreso)
+```
+
+Descendente:
+
+```{r}
+marco %>% arrange(desc(ingreso))
+```
+
+Por estrato y luego por ingreso:
+
+```{r}
+marco %>% arrange(estrato, desc(ingreso))
+```
+
+## 2.4.5 group_by() + summarise() – el corazón del análisis por dominios
+
+```{r}
+marco %>%
+  group_by(area) %>%
+  summarise(
+    n = n(),
+    media_ing = mean(ingreso),
+    mediana = median(ingreso),
+    .groups = "drop"
+  )
+```
+
+Grupos múltiples:
+
+```{r}
+marco %>%
+  group_by(estrato, area) %>%
+  summarise(
+    n = n(),
+    media_ing = mean(ingreso),
+    sd_ing = sd(ingreso),
+    .groups = "drop"
+  )
+```
+
+## 2.4.6 left_join() – combinar tablas del marco
+
+Simulemos totales de marco por estrato:
+
+```{r}
+aux <- tibble(
+  estrato = c("E1","E2"),
+  total_hogares = c(12000, 15000)
+)
+
+marco %>% left_join(aux, by = "estrato")
+```
+
+# 2.5 Tidy evaluation: cómo entiende dplyr las columnas
+
+dplyr permite referirse a las columnas sin comillas:
+
+```{r}
+marco %>% summarise(media = mean(ingreso))
+```
+
+La evaluación ocurre dentro del “contexto” del tibble. Esto será fundamental cuando usemos srvyr, donde:
+
+``` r
+survey_mean(ingreso)
+```
+
+funciona igual que `mean(ingreso)` en dplyr, gracias a esta sintaxis.
+
+# 2.6 Operador pipe: pensar en secuencia
+
+Ejemplo aplicado:
+
+```{r}
+marco %>%
+  filter(area == "urbano", estrato == "E1") %>%
+  mutate(ingreso_pc = ingreso / miembros) %>%
+  summarise(
+    media_pc = mean(ingreso_pc),
+    prop_FGT0 = mean(ingreso_pc < 3000)
+  )
+```
+
+Este pipeline es la base del flujo completo que usaremos con srvyr.
+
+# 2.7 Preparación típica de marco antes de diseñar encuesta
+
+Antes de entrar a `survey`, normalmente se hace:
+
+1.  Limpieza y estandarización de nombres\
+2.  Selección de variables relevantes\
+3.  Construcción de dominios\
+4.  Uniones con tablas auxiliares\
+5.  Ordenamientos previos\
+6.  Cálculo de variables derivadas
+
+Ejemplo prototípico:
+
+```{r}
+marco_limpio <- marco %>%
+  select(upm, hogar, estrato, area, miembros, ingreso) %>%
+  mutate(
+    ingreso_pc = ingreso / miembros,
+    dominio = paste(estrato, area, sep = "_")
+  )
+```
+
+# 3.1 Objetivo del capítulo
+
+En este capítulo nos enfocamos en **tidyr** y en cómo la correcta organización de los datos facilita:
+
+-   la generación de **gráficas** (por ejemplo, histogramas) y
+-   la obtención de **resúmenes descriptivos** claros.
+
+Aunque apoyaremos algunos ejemplos con `dplyr` y `ggplot2`, el objetivo central es entender cómo **cambiar la forma de los datos** (wide ↔ long, separar/unir columnas, manejar valores faltantes) para que:
+
+-   cada fila represente una observación bien definida,
+-   cada columna represente una variable,
+-   y las herramientas de análisis y visualización funcionen sin fricción.
+
+# 3.2 Carga de librerías y datos de ejemplo
+
+En este capítulo utilizaremos:
+
+-   `tidyr` para la organización/reestructuración de datos,
+-   `dplyr` para algunos resúmenes,
+-   `ggplot2` para las gráficas (histogramas y otros gráficos básicos).
+
+```{r}
+#| label: setup-cap3
+#| message: false
+#| warning: false
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+set.seed(28112025)
+```
+
+Construimos un ejemplo que simula una encuesta con:
+
+-   hogares en distintas áreas (urbano/rural),
+-   ingresos anuales para dos años (2023 y 2024),
+-   y número de miembros del hogar.
+
+```{r}
+#| label: datos-cap3
+
+hogares <- tibble(
+  id_hogar    = 1:100,
+  area        = rep(c("urbano", "rural"), each = 50),
+  miembros    = sample(1:7, 100, replace = TRUE),
+  ingreso_2023 = round(rlnorm(100, meanlog = 8, sdlog = 0.5), 2),
+  ingreso_2024 = round(rlnorm(100, meanlog = 8.1, sdlog = 0.5), 2)
+)
+
+hogares
+```
+
+Este tipo de estructura de una columna por año, es muy común en datos administrativos o en bases históricas. Pero no siempre es la más cómoda para graficar o resumir por año.
+
+# 3.3 Principios de tidyr: de ancho a largo pivot_longer
+
+## 3.3.1. Problema
+
+En la tabla `hogares`:
+
+-   `ingreso_2023` y `ingreso_2024` son dos columnas distintas.
+-   Si quisiéramos hacer **un histograma por año**, tendríamos que escribir código diferente para cada columna, lo que no escala bien si tuviéramos más años.
+
+La solución típica es pasar a un formato **largo** con `pivot_longer()`, donde:
+
+-   tengamos una columna llamada, por ejemplo, `anio`,
+-   y otra columna llamada `ingreso`.
+
+## 3.3.2. Uso de pivot_longer()
+
+```{r}
+#| label: pivot-longer-basico
+
+hogares_long <- hogares %>%
+  pivot_longer(
+    cols      = starts_with("ingreso_"),
+    names_to  = "anio",
+    values_to = "ingreso"
+  )
+
+hogares_long
+```
+
+Observa que ahora cada fila indica:
+
+-   un hogar `id_hogar`,
+-   un año `anio`,
+-   y el ingreso correspondiente `ingreso`.
+
+Para facilitar el análisis, conviene extraer el año como número:
+
+```{r}
+#| label: pivot-longer-anio-num
+
+hogares_long <- hogares_long %>%
+  mutate(
+    anio = readr::parse_number(anio)
+  )
+
+hogares_long
+```
+
+# 3.4 Histogramas por año utilizando tidyr + ggplot2
+
+Ahora que cada fila representa un hogar-año, hacer un histograma por año es directo.
+
+```{r}
+#| label: histograma-por-anio
+
+ggplot(hogares_long, aes(x = ingreso)) +
+  geom_histogram(bins = 30, color = "white") +
+  facet_wrap(~ anio, ncol = 1, scales = "free_y") +
+  labs(
+    title = "Distribución del ingreso por año",
+    x = "Ingreso del hogar",
+    y = "Frecuencia"
+  )
+```
+
+Comentarios:
+
+-   `facet_wrap(~ anio)` hace un panel por año.
+-   La misma estructura funcionaría si tuviéramos más años, sin cambiar el código.
+
+En un contexto de encuesta, este patrón es útil cuando queremos comparar distribuciones de una variable de ingreso, gasto o cualquier indicador entre varios años, rondas o dominios.
+
+# 3.5 Resúmenes descriptivos por año y área
+
+Con los datos en formato largo, podemos combinar `group_by()` + `summarise()` para obtener estadísticas descriptivas por año y área.
+
+```{r}
+#| label: resumen-anio-area
+
+resumen_anio_area <- hogares_long %>%
+  group_by(anio, area) %>%
+  summarise(
+    n_hogares   = n(),
+    media_ing   = mean(ingreso),
+    mediana_ing = median(ingreso),
+    sd_ing      = sd(ingreso),
+    q25         = quantile(ingreso, 0.25),
+    q75         = quantile(ingreso, 0.75),
+    .groups     = "drop"
+  )
+
+resumen_anio_area
+```
+
+Este tipo de tabla resume información que luego puede presentarse en:
+
+-   cuadros de informe,
+-   anexos técnicos,
+-   o usarse como insumo para decidir puntos de corte, clases de histogramas, etc.
+
+# 3.6 De largo a ancho con pivot_wider
+
+Supongamos que, tras el análisis, queremos volver a un formato de una fila por hogar, con columnas que representen el ingreso medio por año y área, o alguna otra combinación.
+
+### 3.6.1 Ejemplo simple de pivot_wider
+
+Tomemos la tabla de resúmenes por año y área, y volvamos a una estructura donde cada área tenga columnas separadas por año.
+
+```{r}
+#| label: pivot-wider-resumen
+
+resumen_wide <- resumen_anio_area %>%
+  select(anio, area, media_ing) %>%
+  pivot_wider(
+    names_from  = anio,
+    values_from = media_ing,
+    names_prefix = "media_"
+  )
+
+resumen_wide
+```
+
+Esto es útil, por ejemplo, cuando se construyen cuadros comparativos de indicadores clave por año.
+
+# 3.7 separate() y unite(): trabajar con códigos compuestos
+
+En marcos muestrales y bases administrativas es frecuente encontrar **códigos concatenados** que contienen varias piezas de información (departamento, área, UPM, etc.). `tidyr` ofrece:
+
+-   `separate()` para descomponer una columna en varias,
+-   `unite()` para combinar varias columnas en una sola.
+
+## 3.7.1 Ejemplo con códigos sintéticos
+
+Creamos un código de dominio que concatena estrato y área:
+
+```{r}
+#| label: ejemplo-unite
+
+hogares_dom <- hogares_long %>%
+  mutate(
+    estrato = ifelse(area == "urbano", "E1", "E2")
+  ) %>%
+  unite("codigo_dom", estrato, area, anio, sep = "_")
+
+hogares_dom
+```
+
+Ahora `codigo_dom` codifica tres componentes. Si más adelante queremos recuperar las partes:
+
+```{r}
+#| label: ejemplo-separate
+
+hogares_dom_sep <- hogares_dom %>%
+  separate(
+    col  = codigo_dom,
+    into = c("estrato", "area", "anio"),
+    sep  = "_"
+  ) %>%
+  mutate(
+    anio = as.integer(anio)
+  )
+
+hogares_dom_sep
+```
+
+Este tipo de operación es muy útil cuando se reciben tablas con identificadores “codificados” que deben descomponerse para usarlos como dominios, estratos o claves de unión con otras tablas.
+
+# 3.8 Manejo de valores faltantes con tidyr
+
+En la práctica encontraremos valores faltantes (NA) por distintas razones (no respuesta, errores, etc.). `tidyr` facilita algunas operaciones típicas:
+
+-   `drop_na()` para eliminar observaciones con NA en ciertas columnas,
+-   `replace_na()` para imputar valores simples (por ejemplo, ceros o cadenas vacías).
+
+## 3.8.1 Ejemplo con NA artificiales
+
+Introduzcamos NA de forma artificial para ilustrar:
+
+```{r}
+#| label: ejemplo-na
+
+hogares_na <- hogares_long %>%
+  mutate(
+    ingreso = ifelse(runif(n()) < 0.05, NA, ingreso)
+  )
+
+hogares_na %>% filter(is.na(ingreso)) %>% head()
+```
+
+Si queremos excluir estas observaciones para un cálculo particular:
+
+```{r}
+hogares_sin_na <- hogares_na %>%
+  drop_na(ingreso)
+
+hogares_sin_na
+```
+
+En análisis descriptivo y gráfico, es importante ser explícitos sobre qué hacemos con los NA, y `tidyr` aporta herramientas para manejarlos de forma clara.
+
+# 3.9 Gráficos adicionales: boxplots y densidades por año y área
+
+Una vez que tenemos los datos en formato largo y limpios, es fácil generar gráficos que ayuden a explorar la distribución del ingreso por año y área.
+
+## 3.9.1 Boxplots por año y área
+
+```{r}
+#| label: boxplot-anio-area
+
+ggplot(hogares_long, aes(x = area, y = ingreso)) +
+  geom_boxplot() +
+  facet_wrap(~ anio) +
+  labs(
+    title = "Distribución del ingreso por área y año",
+    x = "Área",
+    y = "Ingreso"
+  )
+```
+
+## 3.9.2 Densidades por año
+
+```{r}
+#| label: densidad-anio
+
+ggplot(hogares_long, aes(x = ingreso, color = factor(anio))) +
+  geom_density() +
+  labs(
+    title = "Densidad del ingreso por año",
+    x = "Ingreso",
+    color = "Año"
+  )
+```
+
+Estas visualizaciones son típicas en una etapa de análisis exploratorio, antes de construir modelos o aplicar diseños de encuesta.
+
+La idea central es que **la forma de los datos condiciona la facilidad del análisis**.\
+En los próximos capítulos, estas mismas transformaciones serán la base para preparar marcos y muestras que luego se analizarán con `survey` y `srvyr`, usando factores de expansión y diseños muestrales reales.
+
+# 4.1 Introducción
+
+En este capítulo introducimos el uso de los paquetes **survey** y **srvyr** para trabajar con **diseños muestrales complejos** en R.
+
+A diferencia de los capítulos anteriores, aquí:
+
+-   declaramos explícitamente el **diseño de encuesta** (UPM, estratos, factores de expansión),
+-   usamos funciones que respetan ese diseño al calcular medias, totales y proporciones,
+-   y mostramos cómo `srvyr` permite escribir estos análisis con una sintaxis coherente con `dplyr`.
+
+Asumiremos que ya disponemos de una base con:
+
+-   identificador de UPM,
+-   estrato,
+-   factor de expansión,
+-   variables de interés.
+
+# 4.2 Carga de librerías y datos de ejemplo
+
+Trabajaremos con:
+
+-   `survey` para declarar diseños y calcular estimadores;
+-   `srvyr` para operar sobre esos diseños con verbos tipo `dplyr`;
+-   `dplyr` para pequeñas transformaciones auxiliares.
+
+```{r}
+#| label: setup-cap4
+#| message: false
+#| warning: false
+
+library(dplyr)
+library(survey)
+library(srvyr)
+
+
+```
+
+## Importante
+
+```{r}
+# Convención para UPM solitarias
+options(survey.lonely.psu = "adjust")
+
+```
+
+Construimos una base de ejemplo que simula una encuesta de hogares con:
+
+-   2 estratos (E1, E2),
+-   UPM numeradas dentro de cada estrato,
+-   ingresos de hogar,
+-   un factor que podríamos interpretar como “número de hogares de la población que representa cada registro”.
+
+```{r}
+#| label: datos-ejemplo-cap4
+
+set.seed(x)
+
+muestra <- tibble(
+  id_hogar = 1:120,
+  estrato  = rep(c("E1", "E2"), each = 60),
+  upm      = rep(rep(1:12, each = 5), times = 2),
+  area     = rep(c("urbano", "rural"), times = 60),
+  miembros = sample(1:7, size = 120, replace = TRUE),
+  ingreso  = round(rlnorm(120, meanlog = 8.2, sdlog = 0.6), 2)
+) %>%
+  mutate(
+    peso = round(runif(n(), min = 80, max = 200), 1)  # pesos ficticios
+  )
+
+muestra
+```
+
+En un escenario real, los pesos no se generan con `runif()`, sino que provienen de:
+
+-   probabilidades de selección por etapa,
+-   ajustes por no respuesta,
+-   calibraciones a totales de marco, etc.
+
+Aquí los usamos solo para ilustrar el flujo con `survey`/`srvyr`.
+
+# 4.3 Declaración de un diseño muestral con survey
+
+La función central de `survey` es `svydesign()`. Su papel es convertir una tabla de datos en un **objeto de diseño** que sabe:
+
+-   cuáles son las UPM (ids),
+-   cuáles son los estratos,
+-   cuál es el peso de cada observación,
+-   y eventualmente, cuál es la fracción de muestreo o el tamaño poblacional total.
+
+## 4.3.1 svydesign básico (estratos + UPM + pesos)
+
+```{r}
+#| label: diseno-survey-basico
+
+diseno_svy <- svydesign(
+  ids     = ~upm,
+  strata  = ~estrato,
+  weights = ~peso,
+  data    = muestra,
+  nest = TRUE
+)
+
+diseno_svy
+```
+
+Comentarios:
+
+-   `ids = ~upm` indica que la UPM es la unidad primaria de muestreo.
+-   `strata = ~estrato` indica que la muestra se obtuvo por estratos.
+-   `weights = ~peso` asigna a cada hogar su factor de expansión.
+-   `data = muestra` es la tabla subyacente.
+
+Este objeto `diseno_svy` será la base para todos los estimadores que respetan el diseño.
+
+## 4.3.2 Opciones para UPM solitarias
+
+En algunos estratos puede haber solo una UPM en la muestra. Esto genera problemas al calcular varianzas. Por eso se configura globalmente:
+
+```{r}
+options(survey.lonely.psu = "adjust")
+```
+
+Algunas opciones posibles son:
+
+-   `"adjust"`: ajusta la varianza dentro del estrato,
+-   `"average"`: promedia varianzas sobre los estratos,
+-   `"certainty"`: trata la UPM como de inclusión cierta,
+-   `"remove"`: elimina el estrato, no recomendado.
+
+En aplicaciones institucionales, esta decisión debe documentarse explícitamente.
+
+# 4.4 Estimadores básicos con survey
+
+Una vez declarado el diseño, las funciones `svymean()`, `svytotal()`, `svyquantile()`, etc., calculan estimadores y sus errores estándar usando el diseño.
+
+## 4.4.1 Media y total de ingreso
+
+```{r}
+#| label: svymean-total
+
+media_ingreso <- svymean(~ingreso, design = diseno_svy)
+media_ingreso
+
+total_ingreso <- svytotal(~ingreso, design = diseno_svy)
+total_ingreso
+```
+
+La salida incluye:
+
+-   estimador puntual,
+-   error estándar,
+-   intervalos de confianza, deff, cv, etc.
+
+## 4.4.2 Proporciones
+
+Supongamos que definimos como a un hogar pobre, un hogar cuyo ingreso está por debajo de un umbral del FGT.
+
+```{r}
+#| label: svymean-prop
+
+umbral_pobreza <- 3000
+
+diseno_svy_pobre <- update(
+  diseno_svy,
+  pobre = ingreso < umbral_pobreza
+)
+
+prop_pobres <- svymean(~pobre, design = diseno_svy_pobre)
+prop_pobres
+```
+
+Aquí:
+
+-   `update()` añade la variable `pobre` al diseño sin modificar la tabla original.
+-   `svymean(~pobre, ...)` interpreta `pobre` como una variable 0/1, y devuelve la proporción estimada y su error estándar.
+
+## 4.4.3 Cuantiles (por ejemplo, mediana del ingreso)
+
+```{r}
+#| label: svyquantile
+
+svyquantile(
+  ~ingreso,
+  design  = diseno_svy,
+  quantiles = c(0.25, 0.5, 0.75),
+  ci      = TRUE
+)
+```
+
+Esto devuelve cuantiles estimados y, si se solicita, intervalos de confianza.
+
+# 4.5 Estimación por dominios con survey
+
+Con frecuencia interesa obtener estimaciones por dominios, para eso se suele usar `svyby()`.
+
+## 4.5.1 Media por área
+
+```{r}
+#| label: svyby-area
+
+media_por_area <- svyby(
+  ~ingreso,
+  by      = ~area,
+  design  = diseno_svy,
+  FUN     = svymean
+)
+
+media_por_area
+```
+
+## 4.5.2 Proporción de hogares pobres por área
+
+```{r}
+#| label: svyby-prop-area
+
+prop_pobres_area <- svyby(
+  ~pobre,
+  by      = ~area,
+  design  = diseno_svy_pobre,
+  FUN     = svymean
+)
+
+prop_pobres_area
+```
+
+Estos patrones `svyby` + `svymean` aparecerán continuamente cuando trabajemos con dominios de interés (departamentos, áreas, grupos de edad, etc.).
+
+# 4.6 Diseños con corrección de población finita
+
+En algunos diseños, especialmente cuando la fracción de muestreo es grande, se incluye información de **tamaños poblacionales (N_h)** para ajustar las varianzas.
+
+`svydesign()` permite especificar:
+
+-   `fpc = ~N_h`: tamaño de población por unidad muestreada, o
+-   `fpc = ~n_h/N_h`: fracción de muestreo.
+
+### Ejemplo
+
+Supongamos que conocemos el tamaño de población de hogares por estrato.
+
+```{r}
+#| label: svydesign-fpc
+
+totales_estrato <- tibble(
+  estrato        = c("E1", "E2"),
+  hogares_pobtot = c(15000, 20000)
+)
+
+muestra_con_N <- muestra %>%
+  left_join(totales_estrato, by = "estrato")
+
+diseno_svy_fpc <- svydesign(
+  ids     = ~upm,
+  strata  = ~estrato,
+  weights = ~peso,
+  fpc     = ~hogares_pobtot,
+  data    = muestra_con_N,
+  nest = TRUE
+)
+
+diseno_svy_fpc
+```
+
+No entraremos en detalle en este capítulo sobre la teoría de varianza con fpc, pero es importante mostrar desde ahora que `survey` permite incluir esta información cuando está disponible.
+
+# 4.7 De survey a srvyr: una interfaz tipo dplyr
+
+Trabajar directamente con `survey` es muy flexible, pero su sintaxis (`svymean`, `svyby`, etc.) difiere a la de `dplyr`. El paquete **srvyr** envuelve a survey y permite:
+
+-   declarar el diseño con `as_survey_design()`,
+-   usar `group_by()` + `summarise()` con funciones como `survey_mean()` y `survey_total()`.
+
+## 4.7.1 Declarar el diseño con srvyr
+
+```{r}
+#| label: diseno-srvyr
+
+diseno_srvyr <- muestra %>%
+  as_survey_design(
+    ids     = upm,
+    strata  = estrato,
+    weights = peso,
+    nest = TRUE
+  )
+
+diseno_srvyr
+```
+
+## 4.7.2 Medias y totales globales con srvyr
+
+```{r}
+#| label: srvyr-global
+
+resumen_global <- diseno_srvyr %>%
+  summarise(
+    media_ingreso = survey_mean(ingreso),
+    total_ingreso = survey_total(ingreso)
+  )
+
+resumen_global
+```
+
+La lógica es análoga a `dplyr`:
+
+-   Primero definimos el diseño `as_survey_design()`,
+-   Luego usamos `summarise()` sobre ese diseño, pero con funciones de `survey`.
+
+## 4.7.3 Proporciones con srvyr
+
+Volvemos a usar el indicador de pobreza, pero ahora desde srvyr:
+
+```{r}
+#| label: srvyr-prop
+
+umbral_pobreza <- 3000
+
+diseno_srvyr_pobre <- diseno_srvyr %>%
+  mutate(
+    pobre = ingreso < umbral_pobreza
+  )
+
+resumen_prop_global <- diseno_srvyr_pobre %>%
+  summarise(
+    prop_pobres = survey_mean(pobre)
+  )
+
+resumen_prop_global
+```
+
+Obsérvese que:
+
+-   `mutate()` funciona como en dplyr, pero ahora aplicado al diseño `diseno_srvyr`.
+-   `survey_mean(pobre)` interpreta automáticamente la variable lógica como 0/1.
+
+## 4.7.4 Resultados por dominio con srvyr
+
+La gran ventaja de srvyr se ve al hacer estimaciones por dominio: la sintaxis es básicamente la misma que usarías con dplyr sobre una tabla simple.
+
+### Media de ingreso por área
+
+```{r}
+#| label: srvyr-media-area
+
+resumen_media_area <- diseno_srvyr %>%
+  group_by(area) %>%
+  summarise(
+    media_ingreso = survey_mean(ingreso)
+  )
+
+resumen_media_area
+```
+
+### Proporción de hogares pobres por estrato y área
+
+```{r}
+#| label: srvyr-prop-estrato-area
+
+resumen_pobreza_estrato_area <- diseno_srvyr_pobre %>%
+  group_by(estrato, area) %>%
+  summarise(
+    prop_pobres = survey_mean(pobre),
+    .groups     = "drop_last"
+  )
+
+resumen_pobreza_estrato_area
+```
+
+Esta estructura (`group_by()` + `summarise()`) será la que usaremos de manera sistemática en los capítulos de muestreo, cuando conectemos los factores de expansión construidos a partir del diseño con estimadores para indicadores específicos.
+
+# 4.8 Diseño con réplicas
+
+Además de `svydesign()`, el paquete survey permite trabajar con **diseños de réplicas** (`svrepdesign`), que son muy comunes en encuestas internacionales (por ejemplo, bootstrap, jackknife, BRR). Solo daremos una visión preliminar aquí, ya que su desarrollo detallado corresponde a un capítulo avanzado.
+
+Supongamos que ya tenemos pesos de réplica (esto suele venir dado en la documentación de la encuesta). El flujo típico sería:
+
+```{r}
+#| label: svrepdesign-ejemplo
+#| eval: false
+
+diseno_rep <- svrepdesign(
+  weights    = ~peso,
+  repweights = "w_rep[0-9]+",  # columnas con pesos replicados
+  type       = "bootstrap",
+  data       = muestra
+)
+
+svymean(~ingreso, design = diseno_rep)
+```
+
+La ventaja de los diseños de réplicas es que permiten estimar varianzas mediante técnicas de remuestreo, y en muchos casos simplifican la incorporación de aspectos complejos del diseño.
+
+# 5.1. Introducción
+
+En este capítulo desarrollamos de forma sistemática el **cálculo del tamaño de muestra** para encuestas de hogares, tomando como referencia la lógica utilizada en:
+
+-   los archivos de tamaño de muestra de **ENIF**, y\
+-   los archivos de tamaño de muestra por **departamento para ENPEVI**.
+
+La meta es construir un esquema que puedas reutilizar:
+
+-   para **proporciones**,
+-   con **corrección por población finita,**
+-   incorporando un **efecto de diseño**,
+-   y extendido a **múltiples dominios**.
+
+En este capítulo todavía **no se selecciona la muestra en el marco** ni se calculan factores de expansión: eso se verá en capítulos posteriores. Aquí nos concentramos únicamente en el **tamaño de muestra teórico y operativo**.
+
+```{r}
+#| label: setup-tamano-muestra
+#| message: false
+#| warning: false
+
+library(dplyr)
+library(tidyr)
+library(purrr)
+```
+
+# 5.2. Tamaño de muestra para una proporción en un dominio
+
+## 5.2.1 Planteamiento del problema
+
+Queremos estimar una **proporción poblacional** (p) (por ejemplo, proporción de hogares con acceso a cuenta bancaria, proporción de personas con tarjeta de débito, etc.) con:
+
+-   nivel de confianza (1 - $α_x$),
+-   error máximo tolerable (e) (margen de error absoluto en puntos porcentuales),
+-   y un **efecto de diseño** (DEFF) que aproxima el impacto de estratificación y conglomeración.
+
+El tamaño de muestra bajo muestreo aleatorio simple con población “infinita” (o muy grande) se aproxima por:
+
+$$
+n_{\infty} = \frac{p (1 - p) \; DEFF}{\frac{A^2}{4z^2}},
+$$ donde:
+
+-   $z$ es el cuantil de la normal estándar correspondiente al nivel de confianza (por ejemplo, 1.96 para 95%),
+-   $p$ es una proporción de referencia,
+-   $e$ la amplitud del intervalo de confianza tolerable,
+-   $DEFF$ es el efecto de diseño,
+
+## 5.2.2 Implementación de la fórmula básica en R
+
+Definimos una función general para $(n_{\infty})$:
+
+```{r}
+#| label: f-n-inf
+
+n_infinito_prop <- function(p, e, z = 1.96, deff = 1) {
+  if (p <= 0 || p >= 1) stop("p debe estar en (0,1)")
+  if (e <= 0) stop("e debe ser positivo")
+  (z^2 * p * (1 - p) * deff) / (e^2)
+}
+
+# Ejemplo 
+p_ej    <- 0.5
+e_ej    <- 0.05
+deff_ej <- 1.5
+
+n_inf_ej <- n_infinito_prop(p = p_ej, e = e_ej, deff = deff_ej)
+n_inf_ej
+```
+
+El uso de (p = 0.5) corresponde al “peor caso” conocido como máxima varianza, ya que maximiza (p(1-p)) y, por tanto, el tamaño de muestra.
+
+# 5.3. Corrección por población finita
+
+En encuestas como ENIF o ENPEVI, el tamaño de la población objetivo es conocido o puede estimarse con buena precisión. En estos casos, se aplica la **corrección por población finita:**
+
+$$
+n = \frac{n_{\infty}}{1 + (n_{\infty} - 1)/N}
+$$
+
+donde $N$ es el tamaño de la población.
+
+## 5.3.1 Función genérica con FPC
+
+```{r}
+#| label: f-n-fpc
+
+n_fpc <- function(n_inf, N) {
+  ifelse(
+    N <= 0 | is.na(N),                    # condición vectorizada
+    NA_real_,                             # qué devolver si N<=0
+    n_inf / (1 + (n_inf - 1) / N)         # tu fórmula de corrección
+  )
+}
+
+
+# Ejemplo con poblacion de 200,000 unidades
+N_ej <- 200000
+
+n_corr_ej <- n_fpc(n_inf = n_inf_ej, N = N_ej)
+n_corr_ej
+ceiling(n_corr_ej)
+```
+
+# 5.4. Función integrada: tamaño de muestra para una proporción
+
+Es práctico encapsular todo en una sola función que devuelva el tamaño de muestra final ya redondeado:
+
+```{r}
+#| label: f-tamano-muestra-prop
+
+tamano_muestra_prop <- function(
+  p, e, N,
+  z    = 1.96,
+  deff = 1,
+  ceiling_out = TRUE
+) {
+  n_inf <- n_infinito_prop(p = p, e = e, z = z, deff = deff)
+  n_corr <- n_fpc(n_inf = n_inf, N = N)
+  if (ceiling_out) n_corr <- ceiling(n_corr)
+  list(
+    n_inf   = n_inf,
+    n_corr  = n_corr,
+    N       = N,
+    p       = p,
+    e       = e,
+    z       = z,
+    deff    = deff
+  )
+}
+
+# Ejemplo
+res_ej <- tamano_muestra_prop(
+  p    = 0.5,
+  e    = 0.05,
+  N    = 200000,
+  deff = 1.5
+)
+
+res_ej
+```
+
+Esta función captura la lógica central de los scripts que se realizan en el INE para el cálculo del tamaño de muestra de la ENIF/ENPEVI, donde se analizan distintos **escenarios** de (p,e,DEFF) para ver cómo varía el tamaño de muestra.
+
+# 5.5. Escenarios globales de tamaño de muestra
+
+En el caso de ENIF, es habitual estudiar **varios escenarios** de:
+
+-   proporciones esperadas,
+-   errores máximos,
+-   efectos de diseño,
+
+## 5.5.1 Definición de escenarios
+
+```{r}
+#| label: escenarios-enif
+
+N_poblacion <- 8000000  
+
+escenarios <- expand_grid(
+  p    = c(0.1, 0.3, 0.5),
+  e    = c(0.03, 0.05),
+  deff = c(1.2, 1.5, 2.0)
+)
+
+escenarios
+```
+
+## 5.5.2 Cálculo de n para cada escenario
+
+```{r}
+#| label: escenarios-enif-calculo
+
+escenarios_res <- escenarios %>%
+  mutate(
+    z      = 1.96,
+    N      = N_poblacion
+  ) %>%
+  rowwise() %>%
+  mutate(
+    n_inf  = n_infinito_prop(p = p, e = e, z = z, deff = deff),
+    n_corr = n_fpc(n_inf, N),
+    n_fin  = ceiling(n_corr)
+  ) %>%
+  ungroup()
+
+escenarios_res
+```
+
+Esta tabla permite responder preguntas típicas del diseño:
+
+-   ¿Qué pasa si queremos un error de 3 puntos vs 5 puntos?
+-   ¿Qué pasa si el DEFF real fuera 2 en lugar de 1.5?
+-   ¿Cómo cambia la muestra si el indicador es muy raro p = 0.1 vs más frecuente p = 0.5?
+
+# 5.6. Tamaño de muestra por dominios – departamentos
+
+> En lugar de trabajar solo con un tamaño de muestra global, se fija un **criterio mínimo de precisión por dominio** y se calcula un tamaño de muestra por dominio.
+
+El patrón general es:
+
+1.  Se tiene una tabla con:
+    -   población$N_d$ por departamento,
+    -   posiblemente alguna proporción de interés $p_d$ o un valor de referencia común.
+2.  Se fija:
+    -   margen de error $e_d$,
+    -   efecto de diseño $DEFF_d$,
+    -   nivel de confianza (1 - $α_x$).
+3.  Se aplica la misma fórmula **dominio por dominio**.
+
+## 5.6.1 Definición de una tabla de dominios
+
+Ejemplo simplificado con 6 “departamentos” y sus tamaños poblacionales:
+
+```{r}
+#| label: dominios-ejemplo
+
+dominios <- tibble(
+  depto = paste0("Departamento_", 1:6),
+  N_d   = c(150000, 210000, 95000, 320000, 180000, 120000)
+)
+
+dominios
+```
+
+## 5.6.2 Tamaño de muestra por dominio
+
+Suponemos un **criterio común** para todos los dominios:
+
+-   p = 0.5 maxima varianza,
+-   e = 0.07 error de 7 puntos porcentuales por dominio,
+-   DEFF = 1.5,
+-   z = 1.96.
+
+```{r}
+#| label: n-por-dominio
+
+p_ref    <- 0.5
+e_ref    <- 0.07
+deff_ref <- 1.5
+z_ref    <- 1.96
+
+tamano_dom <- dominios %>%
+  mutate(
+    n_inf  = n_infinito_prop(p = p_ref, e = e_ref, z = z_ref, deff = deff_ref),
+    n_corr = n_fpc(n_inf, N_d),
+    n_d    = ceiling(n_corr)
+  )
+
+tamano_dom
+sum(tamano_dom$n_d)
+```
+
+## 5.6.3 Escenarios alternativos por dominio
+
+Al igual que en el caso global, puedes estudiar distintas configuracione, por ejemplo:
+
+-   escenario A: (e = 0.07, DEFF = 1.5),
+-   escenario B: (e = 0.05, DEFF = 2.0).
+
+```{r}
+#| label: escenarios-dominios
+
+esc_dom <- expand_grid(
+  escenario = c("A", "B"),
+  e        = c(0.07, 0.05),
+  deff     = c(1.5, 2.0)
+) %>%
+  arrange(escenario)
+
+esc_dom
+```
+
+Esta tabla permite ver, para cada departamento y cada escenario, cuánta muestra sería necesaria.
+
+# 5.7. Conexión con bases de personas y hogares
+
+En algunos casos de tamaño de muestra se trabaja explícitamente con:
+
+-   **base de hogares**, y\
+-   **base de personas**,
+
+para validar que el tamaño de muestra propuesto:
+
+-   garantiza precisión suficiente para indicadores a nivel hogar, y\
+-   puede ser también razonable para ciertos indicadores a nivel persona.
+
+En términos de código, esto suele implicar:
+
+1.  Leer bases o resúmenes donde se tiene $N$ por dominio a nivel hogar y a nivel persona.\
+2.  Aplicar las fórmulas anteriores para determinar $n$ por dominio.\
+3.  Comparar si la muestra a nivel hogar produce tamaños efectivos suficientes para variables de personas (por ejemplo, mujeres 15–49, jóvenes, etc.).
+
+# 6. Selección de la Muestra y Factores de Expansión
+
+En este capítulo abordamos dos piezas centrales del proceso de muestreo:
+
+1.  **Selección de la muestra**
+2.  **Cálculo de factores de expansión básicos**
+3.  **Concepto de calibración**
+4.  **Exploración gráfica de los pesos: histogramas y análisis descriptivo**
+
+------------------------------------------------------------------------
+
+## 6.1 Selección de la muestra
+
+El objetivo es seleccionar una muestra probabilística simple para demostrar el flujo completo:
+
+-   Marco → Selección → Factores de expansión → Calibración
+
+Primero generamos o cargamos un marco simulado:
+
+```{r}
+set.seed(123)
+
+N <- 5000
+marco <- tibble::tibble(
+  id = 1:N,
+  edad = sample(18:80, N, replace = TRUE),
+  sexo = sample(c("Hombre", "Mujer"), N, replace = TRUE),
+  ingreso = round(rlnorm(N, meanlog = 8, sdlog = 0.5))
+)
+```
+
+Seleccionamos una muestra **MAS sin reemplazo**:
+
+```{r}
+n <- 400
+indices <- sample(marco$id, size = n, replace = FALSE)
+muestra <- marco %>% dplyr::filter(id %in% indices)
+
+```
+
+------------------------------------------------------------------------
+
+## 6.2 Cálculo de factores de expansión básicos
+
+Para un MAS sin reemplazo, el peso básico es:
+
+$$ w_i = \frac{N}{n} \ $$
+
+```{r}
+peso_basico <- N / n
+muestra <- muestra %>% dplyr::mutate(peso = peso_basico)
+
+```
+
+------------------------------------------------------------------------
+
+## 6.3 Introducción a la calibración
+
+La calibración ajusta los pesos para que los estimadores respeten totales poblacionales conocidos.
+
+Ejemplo de totales conocidos:
+
+```{r}
+totales <- tibble::tibble(
+  variable = c("Hombre", "Mujer"),
+  total    = c(2600, 2400)
+)
+```
+
+Usamos + `srvyr` para calibrar:
+
+```{r}
+library(survey)
+
+dis_svy <- svydesign(
+  ids     = ~1,
+  weights = ~peso,
+  data    = muestra
+)
+
+dis_svy$variables$sexo <- factor(dis_svy$variables$sexo)
+
+# Creamos dummy para mujer 
+dis_svy$variables$sexoMujer <- ifelse(dis_svy$variables$sexo == "Mujer", 1, 0)
+
+totales_list <- list(`sexoMujer` = 2400)
+
+totales <- c(
+  "sexoMujer" = 2400  # total poblacional de mujeres
+)
+
+names_totales <- intersect(names(dis_svy$variables), names(totales))
+totales <- totales[names_totales]
+
+modelo <- as.formula(
+  paste0("~ -1 + ", paste0(names_totales, collapse = " + "))
+)
+# En este caso: modelo = ~ -1 + sexoMujer
+dis_cal <- calibrate(
+  design     = dis_svy,
+  formula    = modelo,
+  population = totales,
+  calfun     = "raking",
+  bounds     = c(0.3, 3)
+)
+
+```
+
+### Chequeos rápidos
+
+```{r}
+summary(weights(dis_svy))
+summary(weights(dis_cal))
+
+# Total ponderado de mujeres antes y después:
+svymean(~sexoMujer, dis_svy)
+svymean(~sexoMujer, dis_cal)
+
+```
+
+------------------------------------------------------------------------
+
+## 6.4 Histogramas de pesos
+
+```{r}
+library(ggplot2)
+
+ggplot(muestra, aes(x = peso)) +
+  geom_histogram(color = "black", bins = 30) +
+  theme_minimal() +
+  labs(title = "Distribución de pesos básicos",
+       x = "Peso", y = "Frecuencia")
+```
+
+Si usamos calibración:
+
+```{r}
+muestra$w_cal <- weights(dis_cal)
+
+ggplot(muestra, aes(x = w_cal)) +
+  geom_histogram(color = "black", bins = 30, fill = "steelblue") +
+  theme_minimal() +
+  labs(
+    title = "Distribución de pesos calibrados",
+    x = "Peso calibrado", 
+    y = "Frecuencia"
+  )
+
+```
+
+------------------------------------------------------------------------
+
+## 6.5 Resumen descriptivo de los pesos
+
+```{r}
+summary(muestra$peso)
+summary(muestra$w_cal)
+```
+
+También podemos revisar la variabilidad relativa:
+
+```{r}
+sd(muestra$peso) / mean(muestra$peso)
+sd(muestra$w_cal) / mean(muestra$w_cal)
+```
+
+|  |
+|:---|
+| \## 6.6 Paquetes `TeachingSampling` y `ss4surveys` |
+| Hasta ahora hemos hecho la selección de la muestra y el cálculo de factores de expansión **“a mano”** con funciones base `sample()`, fórmulas de $\frac{N}{n}$, etc. En la práctica, existen paquetes en R diseñados específicamente para: |
+| \- **simular diseños muestrales complejos**, y - **calcular tamaños de muestra** bajo distintos supuestos. |
+| Dos de los más útiles para docencia y prototipos rápidos son: |
+| \- `TeachingSampling` - `ss4surveys` |
+
+### 6.6.1 `TeachingSampling`: selección y estimación bajo diseños clásicos
+
+El paquete **`TeachingSampling`** está pensado para cursos de muestreo.\
+Incluye funciones para:
+
+-   seleccionar muestras:
+    -   **MAS / SRS** (`SRS()`),
+    -   **Muestreo sistemático**,
+    -   **Estratificado**,
+    -   **Conglomerados** y **PPT**;
+-   estimadores:
+    -   Horvitz–Thompson,
+    -   Hájek,
+    -   regresión/GREG,
+    -   totales, medias y proporciones.
+
+------------------------------------------------------------------------
+
+### 6.7.2 `ss4surveys`: cálculo estructurado del tamaño de muestra
+
+El paquete **`ss4surveys`** automatiza el cálculo de `n` bajo varios diseños:
+
+-   MAS,
+-   estratificado,
+-   conglomerados 1–2 etapas.
+
+Incluye funciones como:
+
+-   `ss4S()` → Simple Random Sampling\
+-   `ss4H()` → Household sampling\
+-   `ss4b2()` → Two-stage cluster
+
+------------------------------------------------------------------------
+
+### 6.7.3 Relación con el flujo del notebook
+
+`TeachingSampling` y `ss4surveys` funcionan como:
+
+-   herramientas de validación,
+-   prototipos rápidos,
+-   apoyo docente para diseños clásicos,
+-   apoyo y soporte de CEPAL.
+
+---
+title: "Capítulo 7 – Ejemplos integradores y ejercicios"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+editor: visual
+---
+
+# 7.1 Introducción
+
+En los capítulos anteriores vimos, por separado:
+
+-   manipulación de datos con **dplyr** y **tidyr**,
+-   declaración de diseños con **survey** y **srvyr**,
+-   cálculo de **tamaño de muestra**,
+-   selección de unidades y **pesos básicos**,
+-   introducción a la **calibración**.
+
+En este capítulo hacemos algo distinto: mostrar **ejemplos completos y “bonitos”** donde todo eso se usa junto, y luego plantear **ejercicios simplificados** (cambiar nombre de variable, dominio, etc.) para que puedas practicar sin tener que programar desde cero.
+
+La idea es que este capítulo pueda usarse como:
+
+-   material de demostración en clase, y\
+-   banco de ejercicios cortos para estudiantes.
+
+------------------------------------------------------------------------
+
+# 7.2 Ejemplo 1 – Diseño simple, pesos básicos y estimadores de encuesta
+
+## 7.2.1 Marco poblacional simulado
+
+Construimos un marco simple de hogares:
+
+```{r}
+#| label: ejemplo1-marco
+
+N <- 6000
+
+marco <- tibble(
+  id_hogar = 1:N,
+  depto    = sample(
+    c("Guatemala", "Quetzaltenango", "Alta Verapaz"),
+    size   = N,
+    replace = TRUE,
+    prob    = c(0.45, 0.25, 0.30)
+  ),
+  area     = sample(c("urbano", "rural"), N, replace = TRUE, prob = c(0.65, 0.35)),
+  miembros = sample(1:8, N, replace = TRUE),
+  ingreso  = round(rlnorm(N, meanlog = 8.1, sdlog = 0.55), 2),
+  mujer_jf = rbinom(N, size = 1, prob = 0.35)  # mujer jefa de hogar
+)
+
+marco
+```
+
+## 7.2.2 Selección de la muestra (MAS)
+
+Seleccionamos una muestra **MAS sin reemplazo** de tamaño $n = 600$:
+
+```{r}
+#| label: ejemplo1-muestra
+
+n <- 600
+ids_muestra <- sample(marco$id_hogar, size = n, replace = FALSE)
+
+muestra1 <- marco %>%
+  filter(id_hogar %in% ids_muestra) %>%
+  arrange(id_hogar)
+
+muestra1
+```
+
+## 7.2.3 Pesos básicos
+
+En un MAS sin reemplazo de $n$ unidades de una población de tamaño $N$, el peso básico es:
+
+$$ w_i = \frac{N}{n}. $$
+
+```{r}
+#| label: ejemplo1-pesos
+
+w_basico <- N / n
+
+muestra1 <- muestra1 %>%
+  mutate(peso = w_basico)
+
+muestra1 %>%
+  summarise(
+    N        = N,
+    n        = n(),
+    peso_med = mean(peso)
+  )
+```
+
+## 7.2.4 Declaración del diseño con survey y srvyr
+
+```{r}
+#| label: ejemplo1-diseno
+
+diseno1_svy <- svydesign(
+  ids     = ~1,
+  weights = ~peso,
+  data    = muestra1
+)
+
+diseno1_srvyr <- muestra1 %>%
+  as_survey_design(
+    ids     = 1,
+    weights = peso
+  )
+
+diseno1_svy
+diseno1_srvyr
+```
+
+## 7.2.5 Estimadores: media, proporción, totales
+
+Media y total de ingreso de hogares:
+
+```{r}
+#| label: ejemplo1-estimadores-1
+
+svymean(~ingreso, design = diseno1_svy)
+svytotal(~ingreso, design = diseno1_svy)
+```
+
+Proporción de hogares con mujer jefa:
+
+```{r}
+#| label: ejemplo1-estimadores-2
+
+svymean(~mujer_jf, design = diseno1_svy)
+```
+
+Con `srvyr`:
+
+```{r}
+#| label: ejemplo1-estimadores-srvyr
+
+diseno1_srvyr %>%
+  summarise(
+    ingreso_medio = survey_mean(ingreso),
+    prop_mujer_jf = survey_mean(mujer_jf)
+  )
+```
+
+## 7.2.6 Gráfico “bonito”: ingreso medio por área con intervalos de confianza
+
+Usamos `srvyr` + `ggplot2`:
+
+```{r}
+#| label: ejemplo1-grafico
+#| fig-width: 7
+#| fig-height: 4
+
+res_area <- diseno1_srvyr %>%
+  group_by(area) %>%
+  summarise(
+    ingreso_mean = survey_mean(ingreso, vartype = "ci"),  # <- aquí pedimos CI
+    .groups      = "drop"
+  )
+
+res_area
+
+
+```
+
+```{r}
+#| label: ejemplo1-grafico-plot
+#| fig-width: 7
+#| fig-height: 4
+
+ggplot(res_area, aes(x = area, y = ingreso_mean)) +
+  geom_col() +
+  geom_errorbar(
+    aes(ymin = ingreso_mean_low, ymax = ingreso_mean_upp),
+    width = 0.2
+  ) +
+  labs(
+    title = "Ingreso medio de los hogares por área (estimación con diseño)",
+    x     = "Área",
+    y     = "Ingreso medio (estimado)"
+  ) +
+  theme_minimal()
+
+```
+
+------------------------------------------------------------------------
+
+# 7.3 Ejemplo 2 – Diseño estratificado con pesos diferentes
+
+En este ejemplo mostramos:
+
+-   estratos definidos por departamento,
+-   tamaños de muestra distintos por estrato,
+-   pesos $w_h = N_h / n_h$,
+-   estimaciones por dominio.
+
+## 7.3.1 N por estrato y asignación de muestra
+
+```{r}
+#| label: ejemplo2-N-estrato
+
+N_estrato <- marco %>%
+  count(depto, name = "N_h")
+
+N_estrato
+```
+
+Definimos tamaños de muestra por estrato para obtener un $n$ total cercano a 800:
+
+```{r}
+#| label: ejemplo2-asignacion
+
+n_total_obj <- 800
+
+asignacion <- N_estrato %>%
+  mutate(
+    fraccion_h = N_h / sum(N_h),
+    n_h        = round(fraccion_h * n_total_obj)
+  )
+
+asignacion
+sum(asignacion$n_h)
+```
+
+Pequeño ajuste para que la suma sea exactamente `n_total_obj`:
+
+```{r}
+#| label: ejemplo2-ajuste-asignacion
+
+dif <- n_total_obj - sum(asignacion$n_h)
+
+if (dif != 0) {
+  idx_max <- which.max(asignacion$N_h)
+  asignacion$n_h[idx_max] <- asignacion$n_h[idx_max] + dif
+}
+
+asignacion
+sum(asignacion$n_h)
+```
+
+## 7.3.2 Selección estratificada y pesos por estrato
+
+Seleccionamos muestra estratificada:
+
+```{r}
+#| label: ejemplo2-muestra
+
+muestra2 <- marco %>%
+  group_by(depto) %>%
+  group_modify(~ {
+    nh <- asignacion$n_h[asignacion$depto == .y$depto]
+    idx <- sample(seq_len(nrow(.x)), size = nh)
+    .x[idx, ]
+  }) %>%
+  ungroup()
+
+muestra2
+nrow(muestra2)
+```
+
+Calculamos pesos $w_h = N_h / n_h$:
+
+```{r}
+#| label: ejemplo2-pesos
+
+muestra2 <- muestra2 %>%
+  left_join(asignacion, by = "depto") %>%
+  mutate(
+    peso = N_h / n_h
+  )
+
+muestra2 %>%
+  group_by(depto) %>%
+  summarise(
+    N_h   = first(N_h),
+    n_h   = n(),
+    w_med = mean(peso),
+    .groups = "drop"
+  )
+```
+
+## 7.3.3 Diseño estratificado y estimaciones por estrato
+
+```{r}
+#| label: ejemplo2-diseno
+
+diseno2_svy <- svydesign(
+  ids     = ~1,
+  strata  = ~depto,
+  weights = ~peso,
+  data    = muestra2
+)
+
+diseno2_srvyr <- muestra2 %>%
+  as_survey_design(
+    ids     = 1,
+    strata  = depto,
+    weights = peso
+  )
+```
+
+Estimamos la proporción de hogares con mujer jefa por departamento:
+
+```{r}
+#| label: ejemplo2-prop-mujer
+
+#| label: ejemplo2-prop-mujer
+
+res_mujer_depto <- diseno2_srvyr %>%
+  group_by(depto) %>%
+  summarise(
+    prop_mujer_jf = survey_mean(mujer_jf, vartype = "ci"),
+    .groups       = "drop"
+  )
+
+res_mujer_depto
+# columnas esperadas:
+# depto, prop_mujer_jf, prop_mujer_jf_low, prop_mujer_jf_upp
+
+```
+
+Gráfico de barras:
+
+```{r}
+#| label: ejemplo2-grafico
+#| fig-width: 7
+#| fig-height: 4
+
+ggplot(res_mujer_depto, aes(x = depto, y = prop_mujer_jf)) +
+  geom_col() +
+  geom_errorbar(
+    aes(ymin = prop_mujer_jf_low, ymax = prop_mujer_jf_upp),
+    width = 0.2
+  ) +
+  labs(
+    title = "Proporción de hogares con mujer jefa por departamento",
+    x     = "Departamento",
+    y     = "Proporción estimada"
+  ) +
+  theme_minimal()
+
+```
+
+------------------------------------------------------------------------
+
+# 7.4 Ejemplo 3 – Calibración simple y comparación de pesos
+
+Aquí ilustramos cómo la calibración ajusta los pesos para respetar totales conocidos.
+
+## 7.4.1 Totales poblacionales aproximados por sexo
+
+Construimos totales “verdaderos” desde el marco (en un caso real vendrían de un censo):
+
+```{r}
+#| label: ejemplo3-totales
+
+totales_sexo <- marco %>%
+  mutate(
+    hombre = as.integer(runif(n()) < 0.48),  # ej. etiqueta binaria simulada
+    mujer  = 1 - hombre
+  ) %>%
+  summarise(
+    total_hombre = sum(hombre),
+    total_mujer  = sum(mujer)
+  )
+
+totales_sexo
+```
+
+Tomamos la **muestra 2** y creamos indicadores de sexo para calibrar:
+
+```{r}
+#| label: ejemplo3-prep
+
+muestra3 <- muestra2 %>%
+  mutate(
+    hombre = as.integer(runif(n()) < 0.48),
+    mujer  = 1 - hombre
+  )
+
+diseno3_svy <- svydesign(
+  ids     = ~1,
+  strata  = ~depto,
+  weights = ~peso,
+  data    = muestra3
+)
+```
+
+## 7.4.2 Calibración a totales de sexo
+
+Comparamos distribución de pesos antes y después:
+
+```{r}
+#| label: ejemplo3-calibracion
+
+# Totales poblacionales por sexo (vector nombrado)
+poblacion_cal <- c(
+  hombre = totales_sexo$total_hombre,
+  mujer  = totales_sexo$total_mujer
+)
+
+# Por si acaso: alinear nombres con variables que realmente existen en el diseño
+names_totales <- intersect(names(diseno3_svy$variables), names(poblacion_cal))
+poblacion_cal <- poblacion_cal[names_totales]
+
+# Fórmula al estilo anterior (sin intercepto, usando solo las columnas que existen)
+modelo_cal <- as.formula(
+  paste0("~ -1 + ", paste0(names_totales, collapse = " + "))
+)
+
+# Calibración con raking y bounds
+diseno3_cal <- calibrate(
+  design     = diseno3_svy,
+  formula    = modelo_cal,
+  population = poblacion_cal,
+  bounds     = c(0.3, 3),
+  calfun     = "raking"
+)
+
+# Extraer pesos calibrados
+pesos_cal <- weights(diseno3_cal)
+
+```
+
+Histogramas:
+
+```{r}
+#| label: ejemplo3-hist-pesos
+#| fig-width: 7
+#| fig-height: 4
+
+ggplot(muestra3, aes(x = peso)) +
+  geom_histogram(bins = 30, color = "black") +
+  labs(
+    title = "Distribución de pesos básicos",
+    x     = "Peso básico",
+    y     = "Frecuencia"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+#| label: ejemplo3-hist-pesos-cal
+#| fig-width: 7
+#| fig-height: 4
+muestra3$peso_cal <- pesos_cal
+
+ggplot(muestra3, aes(x = peso_cal)) +
+  geom_histogram(bins = 30, color = "black") +
+  labs(
+    title = "Distribución de pesos calibrados",
+    x     = "Peso calibrado",
+    y     = "Frecuencia"
+  ) +
+  theme_minimal()
+```
+
+------------------------------------------------------------------------
+
+# 7.5 Ejercicios propuestos
+
+Los siguientes ejercicios están diseñados para que el estudiante solo tenga que hacer **cambios mínimos** (variables, dominios, parámetros), sin programar desde cero.
+
+## 7.5.1 Ejercicios sobre el Ejemplo 1
+
+1.  **Cambiar variable objetivo**\
+    En el Ejemplo 1, reemplace `ingreso` por `miembros` en:
+    -   las llamadas a `svymean()` y `svytotal()`,
+    -   el cálculo con `srvyr` en `diseno1_srvyr %>% summarise(...)`.\
+        Compare la interpretación de los resultados.
+2.  **Cambiar tamaño de muestra**\
+    En el chunk donde se define `n <- 600`, cambie a `n <- 300` y repita el análisis:
+    -   ¿Cómo cambian los errores estándar?
+    -   ¿Los intervalos de confianza son más anchos?
+3.  **Cambiar el dominio del gráfico**\
+    Modifique el código de `res_area` para agrupar por `depto` en lugar de `area` y genere el gráfico correspondiente.
+
+## 7.5.2 Ejercicios sobre el Ejemplo 2
+
+4.  **Cambiar la asignación de muestra por departamento**\
+    En el chunk de `asignacion`, cambie la regla de redondeo de `round()` a `ceiling()` y observe:
+    -   cómo cambia la tabla de `n_h`,
+    -   cómo cambia la suma total de `n_d`.
+5.  **Nueva variable de resultado**\
+    Cree una variable `pobre` como `pobre = ingreso < quantile(ingreso, 0.3)` dentro de `muestra2` y:
+    -   construya el diseño `diseno2_srvyr` con esa variable incluida,
+    -   estime la proporción de hogares pobres por departamento con `survey_mean()`.
+6.  **Boxplot de ingreso por departamento ponderado**\
+    Con `muestra2`:
+    -   construya un boxplot simple de `ingreso` por `depto` (sin pesos),
+    -   luego discuta cómo podría interpretarse comparado con las estimaciones usando el diseño.
+
+## 7.5.3 Ejercicios sobre el Ejemplo 3 (calibración)
+
+7.  **Cambiar los totales objetivo**\
+    En `totales_sexo`, modifique los totales de `hombre` y `mujer` (por ejemplo, haciendo que hombres sean mayoría) y repita la calibración:
+
+    -   compare cómo cambian los pesos calibrados,
+    -   verifique que la suma ponderada de `hombre` y `mujer` se acerque a los totales especificados.
+
+8.  **Calibración con una sola variable**\
+    Repita la calibración pero usando solo la variable `hombre` en la fórmula (y el total correspondiente).\
+    Compare la forma de la distribución de pesos calibrados con la calibración usando `hombre + mujer`.
+
+9.  **CV de pesos**\
+    Calcule el coeficiente de variación de los pesos antes y después de la calibración:
+
+    ``` r
+    sd(muestra3$peso)     / mean(muestra3$peso)
+    sd(muestra3$peso_cal) / mean(muestra3$peso_cal)
+    ```
+
+    Interprete si la calibración incrementa o no la variabilidad de los pesos.
+
+------------------------------------------------------------------------
+
+Este capítulo cierra el cuaderno con ejemplos integradores y una colección de ejercicios.
