@@ -1,10 +1,13 @@
 ---
 title: "Aspectos Generales de R y Muestro"
+author: "javdlgomez5@gmail.com"
 format:
   html:
     toc: true
     toc-depth: 3
-    theme: darkly
+    theme:
+      light: flatly
+      dark: darkly
 editor: visual
 ---
 
